@@ -1,24 +1,18 @@
 """
 
-import eyed3
-
-audiofile = eyed3.load("song.mp3")
-audiofile.tag.artist = u"Integrity"
-audiofile.tag.album = u"Humanity Is The Devil"
-audiofile.tag.album_artist = u"Integrity"
-audiofile.tag.title = u"Hollow"
-audiofile.tag.track_num = 2
-
-audiofile.tag.save()
 
 """
 
 import os
 import json
 import re
-import eyed3
+import mutagen
+from mutagen.easyid3 import EasyID3
+from mutagen.easymp4 import EasyMP4
 
 __author__ = 'wuqingyi22@gmail.com'
+
+HIMALAYA_DNLD_DIR = r'C:\Users\qingywu\Documents\temp\music'
 
 
 def get_json_list(path):
@@ -123,7 +117,9 @@ def parse_list_json(json_file):
     _eyed3_key_mapping = {
         'albumTitle': 'album',
         'title': 'title',
-        'orderNum': 'track_num'
+        'orderNum': 'tracknumber',
+        'albumId': 'albumId',
+        'trackId': 'filename'
     }
 
     with open(json_file, encoding='utf8') as fp:
@@ -131,9 +127,9 @@ def parse_list_json(json_file):
 
     tracks = dict()
     for track in track_infos:
-        track_dict = track.setdefault('trackId', dict())
+        single_track = tracks.setdefault(track['trackId'], dict())
         for k, v in _eyed3_key_mapping.items():
-            track_dict[v] = track[k]
+            single_track[v] = track[k]
 
     return tracks
 
@@ -141,17 +137,29 @@ def parse_list_json(json_file):
 def update_id3(fp, id3):
     """ Update file ID3 tag
 
+    Try ID3 first, if not exist, try MP4, if still not exist, initialize an ID3.
+
     :param fp:          (str) file with absolute path
     :param id3:         (dict) ID3 info in dict format
     :return:
     """
     if os.path.isfile(fp):
-        audio_file = eyed3.load(fp)
-        audio_file.tag.clear()
-        audio_file.tag.album = id3.get('album')
-        audio_file.tag.title = id3.get('title')
-        audio_file.tag.track_num = id3.get('track_num')
-        audio_file.tag.save()
+        try:
+            audio_file = EasyID3(fp)
+            audio_file['tracknumber'] = id3.get('tracknumber')
+        except mutagen.id3._util.ID3NoHeaderError:
+            print('No ID3 available, try MP4')
+            try:
+                audio_file = EasyMP4(fp)
+                audio_file['tracknumber'] = str(id3.get('tracknumber') + 1)
+            except mutagen.mp4.MP4StreamInfoError:
+                print('Not an MP4 file, create ID3 tag')
+                audio_file = mutagen.File(fp, easy=True)
+                audio_file.add_tags()
+
+        audio_file['album'] = id3.get('album')
+        audio_file['title'] = id3.get('title')
+        audio_file.save()
     else:
         raise FileNotFoundError('Audio File {0} is not found'.format(fp))
 
@@ -167,11 +175,41 @@ def rename_with_id3(fp):
     :return:
     """
     if os.path.isfile(fp):
-        audio_file = eyed3.load(fp)
         path = os.path.dirname(fp)
         ext = re.search(r'(.*)\.(\w+?)$', os.path.basename(fp)).group(2)
-        new = '{0}_{1}.{2}'.format(audio_file.tag.track_num, audio_file.tag.title, ext)
+        try:
+            audio_file = EasyID3(fp)
+            new = '{0}_{1}.{2}'.format(audio_file['tracknumber'], audio_file['title'], ext)
+        except mutagen.id3._util.ID3NoHeaderError:
+            audio_file = EasyMP4(fp)
+            new = '{0}_{1}.{2}'.format(audio_file['tracknumber'][0], audio_file['title'][0], ext)
         os.rename(fp, os.path.join(path, new))
         print('Renamed {0} to {1}'.format(os.path.basename(fp), new))
     else:
         raise FileNotFoundError('File {0} is not found'.format(fp))
+
+
+def main():
+    """ Main function
+    1. Get all list.json file from HIMALAYA_DNLD_DIR
+    2. Update and rename each file in album_path
+    3. Rename album_path
+    :return:
+    """
+    # 1. Get all list.json file from HIMALAYA_DNLD_DIR
+    json_file_list = get_json_list(HIMALAYA_DNLD_DIR)
+    for jfile in json_file_list:
+        tracks = parse_list_json(jfile)
+        album_path = os.path.join(HIMALAYA_DNLD_DIR, str(list(tracks.values())[0].get('albumId')))
+        # 2. Update and rename each file in album_path
+        for file_id3 in tracks.values():
+            files = os.listdir(album_path)
+            target_file = [fn for fn in files if re.match(str(file_id3.get('filename')), fn)][0]
+            fp = os.path.join(album_path, target_file)
+            update_id3(fp, file_id3)
+            rename_with_id3(fp)
+        # 3. Rename album_path
+        os.rename(album_path, os.path.join(HIMALAYA_DNLD_DIR, str(list(tracks.values())[0].get('album'))))
+
+
+main()
