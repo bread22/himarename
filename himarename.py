@@ -14,7 +14,6 @@ audiofile.tag.save()
 """
 
 import os
-import sys
 import json
 import re
 import eyed3
@@ -146,11 +145,24 @@ def update_id3(fp, id3):
     :param id3:         (dict) ID3 info in dict format
     :return:
     """
-    audiofile = eyed3.load(fp)
-    audiofile.tag.clear()
-    audiofile.tag.album = id3.get('album')
-    audiofile.tag.title = id3.get('title')
-    audiofile.tag.track_num = id3.get('track_num')
-    audiofile.tag.save()
+    if os.path.isfile(fp):
+        audio_file = eyed3.load(fp)
+        audio_file.tag.clear()
+        audio_file.tag.album = id3.get('album')
+        audio_file.tag.title = id3.get('title')
+        audio_file.tag.track_num = id3.get('track_num')
+        audio_file.tag.save()
+    else:
+        raise FileNotFoundError('Audio File {0} is not found'.format(fp))
+
 
 def rename_with_id3(fp):
+    if os.path.isfile(fp):
+        audio_file = eyed3.load(fp)
+        path = os.path.dirname(fp)
+        ext = re.search(r'(.*)\.(\w+?)$', os.path.basename(fp)).group(2)
+        new = '{0}_{1}.{2}'.format(audio_file.tag.track_num, audio_file.tag.title, ext)
+        os.rename(fp, os.path.join(path, new))
+        print('Renamed {0} to {1}'.format(os.path.basename(fp), new))
+    else:
+        raise FileNotFoundError('File {0} is not found'.format(fp))
