@@ -6,13 +6,21 @@
 import os
 import json
 import re
+import configparser
+import sys
+import shutil
+import logging
+from pathlib import Path, PurePath
+
 import mutagen
 from mutagen.easyid3 import EasyID3
 from mutagen.easymp4 import EasyMP4
 
 __author__ = 'wuqingyi22@gmail.com'
+__version__ = '0.5.0'
 
-HIMALAYA_DNLD_DIR = r'C:\Users\qingywu\Documents\temp\music'
+logger = logging.getLogger(__name__)
+config_ini = 'config.ini'
 
 
 def get_json_list(path):
@@ -24,8 +32,8 @@ def get_json_list(path):
     :return file_list:          (list) a list of file names (*list.json, created by himalaya) with absolute path
     """
     file_list = os.listdir(path)
-    file_list = [os.path.join(path, fname) for fname in file_list
-                 if os.path.isfile(os.path.join(path, fname)) and re.search(r'.*?list.json', fname)]
+    file_list = [PurePath(path).joinpath(fname) for fname in file_list
+                 if Path(PurePath(path).joinpath(fname)).is_file() and re.search(r'.*?list.json', fname)]
 
     return file_list
 
@@ -111,7 +119,7 @@ def parse_list_json(json_file):
         "isHoldCopyright": false,
         "canAccess": true
     }
-    :param json_file:       (str) a json file with absolute path
+    :param json_file:       (Path) a json file with absolute path
     :return tracks:         (dict) a dict with primary key is files names in input json_file
     """
     _eyed3_key_mapping = {
@@ -139,21 +147,22 @@ def update_id3(fp, id3):
 
     Try ID3 first, if not exist, try MP4, if still not exist, initialize an ID3.
 
-    :param fp:          (str) file with absolute path
+    :param fp:          (Purepath) file with absolute path
     :param id3:         (dict) ID3 info in dict format
     :return:
     """
-    if os.path.isfile(fp):
+    logger.info('Updating ID3 for {0}'.format(fp))
+    if Path(fp).is_file():
         try:
             audio_file = EasyID3(fp)
             audio_file['tracknumber'] = id3.get('tracknumber')
         except mutagen.id3._util.ID3NoHeaderError:
-            print('No ID3 available, try MP4')
+            logger.warning('No ID3 available, try MP4')
             try:
                 audio_file = EasyMP4(fp)
                 audio_file['tracknumber'] = str(id3.get('tracknumber') + 1)
             except mutagen.mp4.MP4StreamInfoError:
-                print('Not an MP4 file, create ID3 tag')
+                logger.warning('Not an MP4 file, create ID3 tag')
                 audio_file = mutagen.File(fp, easy=True)
                 audio_file.add_tags()
 
@@ -161,55 +170,153 @@ def update_id3(fp, id3):
         audio_file['title'] = id3.get('title')
         audio_file.save()
     else:
-        raise FileNotFoundError('Audio File {0} is not found'.format(fp))
+        raise SystemExit('Audio File {0} is not found'.format(fp))
 
 
 def rename_with_id3(fp):
     """ Rename with ID3 info
 
-    Read ID3 info from given audio file, and use ID3 info to rename it.
+    Read ID3/MP4 info from given audio file, and use ID3/MP4 info to rename it.
 
-    format is track_num_title
+    format is tracknum_title
 
-    :param fp:          (str) audio file name with absolute path
+    :param fp:          (Purepath) audio file name with absolute path
     :return:
     """
-    if os.path.isfile(fp):
-        path = os.path.dirname(fp)
-        ext = re.search(r'(.*)\.(\w+?)$', os.path.basename(fp)).group(2)
+    if Path(fp).is_file():
         try:
             audio_file = EasyID3(fp)
-            new = '{0}_{1}.{2}'.format(audio_file['tracknumber'], audio_file['title'], ext)
+            new_name = '{0}_{1}{2}'.format(audio_file['tracknumber'], audio_file['title'], fp.suffix)
         except mutagen.id3._util.ID3NoHeaderError:
             audio_file = EasyMP4(fp)
-            new = '{0}_{1}.{2}'.format(audio_file['tracknumber'][0], audio_file['title'][0], ext)
-        os.rename(fp, os.path.join(path, new))
-        print('Renamed {0} to {1}'.format(os.path.basename(fp), new))
+            new_name = '{0}_{1}{2}'.format(audio_file['tracknumber'][0], audio_file['title'][0], fp.suffix)
+        try:
+            os.rename(fp, fp.parent.joinpath(new_name))
+        except FileExistsError:
+            msg = 'File {0} exists, overwirting.'.format(new_name)
+            print(msg)
+            logger.warning(msg)
+            os.remove(fp.parent.joinpath(new_name))
+            os.rename(fp, fp.parent.joinpath(new_name))
+
+        logger.info('Renamed {0} to {1}'.format(fp, fp.parent.joinpath(new_name)))
     else:
-        raise FileNotFoundError('File {0} is not found'.format(fp))
+        raise SystemExit('File {0} is not found'.format(fp))
+
+
+def copy_file_to_tgt(src, dst, move=False):
+    """ Copy file to target dir
+
+    :param src:         (Purepath) source file
+    :param dst:         (Purepath) destination file
+    :param move:        (bool) whether to keep source file
+    :return ret:        (bool) True if copy/move succeed, False otherwise
+    """
+    ret = True
+    if src == dst:
+        return ret
+
+    if not move:
+        try:
+            shutil.copy(src, dst)
+        except OSError:
+            logger.warning('Target file {0} is not writable'.format(dst))
+            ret = False
+    else:
+            shutil.move(src, dst)
+
+    return ret
+
+
+def load_config():
+    """ Load configuration from config_ini
+
+    :return himalaya_download_dir:  (str) path to himalaya download folder
+    :return target_dir:             (str) path to folder that contains renamed files
+    :return keep_original:          (bool) whether to keep original files in himalaya_download_dir
+
+    """
+    # Load configs from .ini file
+    if not Path(config_ini).is_file():
+        msg = '{0} is not found.'.format(config_ini)
+        print(msg)
+        logger.error(msg)
+        raise SystemExit(msg)
+    config = configparser.ConfigParser()
+    try:
+        config.read(config_ini)
+    except configparser.MissingSectionHeaderError:
+        msg = '{0} format is invalid, must have [DEFAULT] section'.format(config_ini)
+        print(msg)
+        logger.error(msg)
+        raise SystemExit(msg)
+
+    try:
+        himalaya_download_dir = config['DEFAULT']['HIMALAYA_DNLD_DIR']
+        target_dir = config['DEFAULT'].get('TARGET_DIR', fallback=himalaya_download_dir)
+        keep_original = config['DEFAULT'].getboolean('KEEP_ORIGINAL', fallback=True)
+        verbose = config['DEFAULT'].getboolean('VERBOSE', True)
+    except KeyError as err:
+        logger.error('Missing key in {0}'.format(config_ini))
+        logger.error(err)
+        raise SystemExit(str(err))
+
+    # Process configuration to find errors
+    if not Path(himalaya_download_dir).is_dir():
+        msg = '{0} is no a valid folder'.format(Path(himalaya_download_dir))
+        print(msg)
+        logger.error(msg)
+        raise SystemExit(msg)
+    if target_dir == himalaya_download_dir and keep_original:
+        msg = 'You must assign a different TARGET_DIR if you want to keep original files.'
+        print(msg)
+        logger.error(msg)
+        raise SystemExit(msg)
+
+    return Path(himalaya_download_dir), Path(target_dir), keep_original, verbose
 
 
 def main():
     """ Main function
-    1. Get all list.json file from HIMALAYA_DNLD_DIR
+    1. Get all list.json file from himalaya_download_dir
     2. Update and rename each file in album_path
     3. Rename album_path
     :return:
     """
-    # 1. Get all list.json file from HIMALAYA_DNLD_DIR
-    json_file_list = get_json_list(HIMALAYA_DNLD_DIR)
+
+    logging.basicConfig(format='[%(asctime)s] [%(levelname)s]: %(message)s',
+                        datefmt='%m/%d/%Y %I:%M:%S %p',
+                        level=logging.INFO,
+                        handlers=[logging.FileHandler('logfile.log', 'w', 'utf-8')])
+
+    himalaya_download_dir, target_dir, keep_original, verbose = load_config()
+
+    sys.stdout = open(os.devnull, mode='w', encoding='utf-8') if not verbose else sys.stdout
+
+    # 1. Get all list.json file from himalaya_download_dir
+    json_file_list = get_json_list(himalaya_download_dir)
+    os.makedirs(target_dir, exist_ok=True)
     for jfile in json_file_list:
         tracks = parse_list_json(jfile)
-        album_path = os.path.join(HIMALAYA_DNLD_DIR, str(list(tracks.values())[0].get('albumId')))
-        # 2. Update and rename each file in album_path
+        album_path = PurePath(himalaya_download_dir).joinpath(str(list(tracks.values())[0].get('albumId')))
+        if not Path(album_path).is_dir():
+            logger.warning('Source folder {0} does not exist.'.format(album_path))
+            continue
+        album_path_tgt = PurePath(target_dir).joinpath(str(list(tracks.values())[0].get('album')))
+        os.makedirs(album_path_tgt, exist_ok=True)
+        # 2. Copy/Move each file in album_path to album_path_tgt
         for file_id3 in tracks.values():
             files = os.listdir(album_path)
-            target_file = [fn for fn in files if re.match(str(file_id3.get('filename')), fn)][0]
-            fp = os.path.join(album_path, target_file)
-            update_id3(fp, file_id3)
-            rename_with_id3(fp)
-        # 3. Rename album_path
-        os.rename(album_path, os.path.join(HIMALAYA_DNLD_DIR, str(list(tracks.values())[0].get('album'))))
+            src_file = [fn for fn in files if re.match(str(file_id3.get('filename')), fn)][0]
+            src_fp = album_path.joinpath(src_file)
+            tgt_fp = album_path_tgt.joinpath(src_file)
+            copy_file_to_tgt(src_fp, tgt_fp)
+            # 3. Update ID3/MP4 for tgt_fp, and rename it accordingly
+            update_id3(tgt_fp, file_id3)
+            rename_with_id3(tgt_fp)
+        # 4. Delete original files
+        if not keep_original:
+            shutil.rmtree(album_path)
 
 
 main()
