@@ -157,6 +157,15 @@ def update_id3(fp, id3):
 
 
 def rename_with_id3(fp):
+    """ Rename with ID3 info
+
+    Read ID3 info from given audio file, and use ID3 info to rename it.
+
+    format is track_num_title
+
+    :param fp:          (str) audio file name with absolute path
+    :return:
+    """
     if os.path.isfile(fp):
         audio_file = eyed3.load(fp)
         path = os.path.dirname(fp)
