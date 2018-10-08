@@ -17,7 +17,7 @@ from mutagen.easyid3 import EasyID3
 from mutagen.easymp4 import EasyMP4
 
 __author__ = 'wuqingyi22@gmail.com'
-__version__ = '0.5.0'
+__version__ = '0.5.1'
 
 logger = logging.getLogger(__name__)
 config_ini = 'config.ini'
@@ -324,4 +324,5 @@ def main():
             shutil.rmtree(album_path)
 
 
-main()
+if __name__ == "__main__":
+    main()
