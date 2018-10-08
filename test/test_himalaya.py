@@ -3,9 +3,11 @@ Unit tests for himarename.py
 """
 import unittest
 from unittest import mock
-from unittest.mock import patch, mock_open
+from unittest.mock import patch, mock_open, Mock
 from pathlib import PurePath
-from himarename import get_json_list, parse_list_json
+
+import himarename
+from himarename import get_json_list, parse_list_json, update_id3, rename_with_id3
 
 __author__ = 'wuqingyi22@gmail.com'
 __version__ = '0.1.0'
@@ -194,3 +196,58 @@ class HimalayaRenamerTestCase(unittest.TestCase):
             }
             mock_file.assert_called_with('some_file', encoding='utf8')
             self.assertEqual(result, correct_result)
+
+    @mock.patch('himarename.mutagen.File')
+    @mock.patch('himarename.EasyMP4')
+    @mock.patch('himarename.EasyID3')
+    @mock.patch('himarename.Path.is_file')
+    def test_update_id3(self, mock_path_isfile, mock_easyid3, mock_easymp4, mock_mutagen_file):
+        id3 = {'album': '', 'title': '', 'tracknumber': 0}
+
+        mock_path_isfile.return_value = False
+        self.assertRaises(SystemExit, update_id3, 'some_file', id3)
+
+        mock_path_isfile.return_value = True
+        update_id3('some_file', id3)
+        mock_easyid3.assert_called_with('some_file')
+        mock_easyid3.return_value.save.assert_called()
+
+        mock_easyid3.side_effect = himarename.mutagen.id3._util.ID3NoHeaderError()
+        update_id3('some_file', id3)
+        mock_easymp4.assert_called_with('some_file')
+        mock_easymp4.return_value.save.assert_called()
+
+        mock_easyid3.side_effect = himarename.mutagen.id3._util.ID3NoHeaderError()
+        mock_easymp4.side_effect = himarename.mutagen.mp4.MP4StreamInfoError()
+        audio_file = mock_mutagen_file.return_value
+        audio_file.add_tags.return_value = dict()
+        update_id3('some_file', id3)
+        mock_mutagen_file.assert_called_with('some_file', easy=True)
+        mock_mutagen_file.return_value.save.assert_called()
+
+    @mock.patch('himarename.os.remove')
+    @mock.patch('himarename.os.rename')
+    @mock.patch('himarename.EasyMP4')
+    @mock.patch('himarename.EasyID3')
+    @mock.patch('himarename.Path.is_file')
+    def test_rename_with_id3(self, mock_path_isfile, mock_easyid3, mock_easymp4, mock_osrename, mock_osremove):
+        fp = PurePath('some_file')
+
+        mock_path_isfile.return_value = False
+        self.assertRaises(SystemExit, rename_with_id3, fp)
+
+        mock_path_isfile.return_value = True
+        rename_with_id3(fp)
+        mock_easyid3.assert_called_with(fp)
+        mock_osrename.assert_called()
+
+        mock_easyid3.side_effect = himarename.mutagen.id3._util.ID3NoHeaderError()
+        rename_with_id3(fp)
+        mock_easymp4.assert_called_with(fp)
+        mock_osrename.assert_called()
+
+        mock_osrename.side_effect = FileExistsError()
+        self.assertRaises(FileExistsError, rename_with_id3, fp)
+        mock_easymp4.assert_called_with(fp)
+        mock_osrename.assert_called()
+        mock_osremove.assert_called()
