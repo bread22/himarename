@@ -216,15 +216,14 @@ def copy_file_to_tgt(src, dst, move=False):
     if src == dst:
         return ret
 
-    if not move:
-        try:
+    try:
+        if not move:
             shutil.copy(src, dst)
-        except OSError:
-            logger.warning('Target file {0} is not writable'.format(dst))
-            ret = False
-    else:
+        else:
             shutil.move(src, dst)
-
+    except OSError:
+        logger.warning('Target file {0} is not writable'.format(dst))
+        ret = False
     return ret
 
 
@@ -252,10 +251,10 @@ def load_config():
         raise SystemExit(msg)
 
     try:
-        himalaya_download_dir = config['DEFAULT']['HIMALAYA_DNLD_DIR']
-        target_dir = config['DEFAULT'].get('TARGET_DIR', fallback=himalaya_download_dir)
-        keep_original = config['DEFAULT'].getboolean('KEEP_ORIGINAL', fallback=True)
-        verbose = config['DEFAULT'].getboolean('VERBOSE', True)
+        himalaya_download_dir = config.get('DEFAULT', 'HIMALAYA_DNLD_DIR')
+        target_dir = config.get('DEFAULT', 'TARGET_DIR', fallback=himalaya_download_dir)
+        keep_original = config.getboolean('DEFAULT', 'KEEP_ORIGINAL', fallback=True)
+        verbose = config.getboolean('DEFAULT', 'VERBOSE', fallback=True)
     except KeyError as err:
         logger.error('Missing key in {0}'.format(config_ini))
         logger.error(err)
