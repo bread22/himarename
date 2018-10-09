@@ -3,7 +3,7 @@ Unit tests for himarename.py
 """
 import unittest
 from unittest import mock
-from unittest.mock import patch, mock_open, Mock
+from unittest.mock import patch, mock_open
 from pathlib import PurePath, Path
 import configparser
 
@@ -12,7 +12,7 @@ from himarename import get_json_list, parse_list_json, update_id3,\
     rename_with_id3, copy_file_to_tgt, load_config, main
 
 __author__ = 'wuqingyi22@gmail.com'
-__version__ = '0.1.0'
+__version__ = '0.6.0'
 
 
 class HimalayaRenamerTestCase(unittest.TestCase):
@@ -367,10 +367,10 @@ class HimalayaRenamerTestCase(unittest.TestCase):
         get_json_list.return_value = ['1234list.json']
         parse_list_json.return_value = {
             25320005: {
-                'filename': 25320005, 'albumId': 4520927, 'tracknumber': 160,
+                'filename': '25320005', 'albumId': 4520927, 'tracknumber': 160,
                 'title': "话说宋朝161-机关算尽", 'album': '话说宋朝'},
             25496548: {
-                'filename': 25496548, 'albumId': 4520927, 'tracknumber': 161,
+                'filename': '25496548', 'albumId': 4520927, 'tracknumber': 161,
                 'title': '话说宋朝162-死战不退', 'album': '话说宋朝'}
         }
         isdir.return_value = False
@@ -383,11 +383,9 @@ class HimalayaRenamerTestCase(unittest.TestCase):
         makedirs.assert_called_with(Path(r'C:\Users\qingywu\Documents\personal\To Phone\podcasts').joinpath('话说宋朝'),
                                     exist_ok=True)
 
-        # listdir.return_value = ['25496548.m4a', '25320005.mp3']
-        # # with mock.patch('himarename.PurePath', 'stem', new=mocker.PropertyMock)
-        # # stem = 25496548
-        # update_id3.return_value = None
-        # rename_with_id3.return_value = None
-        # himarename.main()
-        # makedirs.assert_called_with(Path(r'C:\Users\qingywu\Documents\personal\To Phone\podcasts').joinpath('话说宋朝'),
-        #                             exist_ok=True)
+        listdir.return_value = ['25496548.m4a', '25320005.mp3']
+        update_id3.return_value = None
+        rename_with_id3.return_value = None
+        himarename.main()
+        makedirs.assert_called_with(Path(r'C:\Users\qingywu\Documents\personal\To Phone\podcasts').joinpath('话说宋朝'),
+                                    exist_ok=True)
