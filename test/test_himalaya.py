@@ -4,10 +4,12 @@ Unit tests for himarename.py
 import unittest
 from unittest import mock
 from unittest.mock import patch, mock_open, Mock
-from pathlib import PurePath
+from pathlib import PurePath, Path
+import configparser
 
 import himarename
-from himarename import get_json_list, parse_list_json, update_id3, rename_with_id3
+from himarename import get_json_list, parse_list_json, update_id3,\
+    rename_with_id3, copy_file_to_tgt, load_config, main
 
 __author__ = 'wuqingyi22@gmail.com'
 __version__ = '0.1.0'
@@ -246,8 +248,146 @@ class HimalayaRenamerTestCase(unittest.TestCase):
         mock_easymp4.assert_called_with(fp)
         mock_osrename.assert_called()
 
-        mock_osrename.side_effect = FileExistsError()
-        self.assertRaises(FileExistsError, rename_with_id3, fp)
+        mock_osrename.side_effect = [FileExistsError(), True]
+        rename_with_id3(fp)
+        # self.assertRaises(FileExistsError, rename_with_id3, fp)
         mock_easymp4.assert_called_with(fp)
         mock_osrename.assert_called()
         mock_osremove.assert_called()
+
+    @mock.patch('shutil.copy')
+    @mock.patch('shutil.move')
+    def test_copy_file_to_tgt(self, mock_move, mock_copy):
+        src = PurePath('file1')
+        dst = PurePath('file2')
+
+        copy_file_to_tgt(src, dst, move=True)
+        mock_move.assert_called()
+
+        copy_file_to_tgt(src, dst, move=False)
+        mock_copy.assert_called()
+
+        mock_copy.side_effect = OSError()
+        assert copy_file_to_tgt(src, dst, move=False) is False
+
+        mock_copy.side_effect = None
+        mock_move.side_effect = OSError()
+        assert copy_file_to_tgt(src, dst, move=False) is True
+
+        mock_copy.side_effect = None
+        mock_move.side_effect = OSError()
+        assert copy_file_to_tgt(src, dst, move=True) is False
+
+        dst = src
+        mock_copy.reset_mock()
+        mock_move.reset_mock()
+        assert copy_file_to_tgt(src, dst, move=True) is True
+        mock_copy.assert_not_called()
+        mock_move.assert_not_called()
+
+    @mock.patch('himarename.Path.is_dir')
+    @mock.patch('himarename.configparser.ConfigParser')
+    @mock.patch('himarename.Path.is_file')
+    def test_load_config(self, mock_isfile, mock_parser, mock_isdir):
+        def get_side_effect(section, option, fallback=None):
+            if section == 'DEFAULT' and option == 'HIMALAYA_DNLD_DIR':
+                return r'C:\Users\qingywu\Music\himalaya'
+            if section == 'DEFAULT' and option == 'TARGET_DIR':
+                return r'C:\Users\qingywu\Documents\personal\To Phone\podcasts'
+
+        def get_side_effect_same(section, option, fallback=None):
+            if section == 'DEFAULT' and option == 'HIMALAYA_DNLD_DIR':
+                return r'C:\Users\qingywu\Music\himalaya'
+            if section == 'DEFAULT' and option == 'TARGET_DIR':
+                return r'C:\Users\qingywu\Music\himalaya'
+
+        def get_side_effect_keyerr(section, option, fallback=None):
+            if section == 'DEFAULT' and option == 'HIMALAYA_DNLD_DIR':
+                return r'C:\Users\qingywu\Music\himalaya'
+            if section == 'DEFAULT' and option == 'TARGET_DIR':
+                raise KeyError
+
+        def getboolean_side_effect(section, option, fallback=None):
+            if section == 'DEFAULT' and option == 'KEEP_ORIGINAL':
+                return False
+            if section == 'DEFAULT' and option == 'VERBOSE':
+                return False
+
+        def getboolean_side_effect_err(section, option, fallback=None):
+            if section == 'DEFAULT' and option == 'KEEP_ORIGINAL':
+                return True
+            if section == 'DEFAULT' and option == 'VERBOSE':
+                return False
+
+        mock_isfile.return_value = False
+        self.assertRaises(SystemExit, load_config)
+
+        mock_isfile.return_value = True
+        mock_isdir.return_value = True
+        config = mock_parser.return_value
+        config.read.return_value = True
+        config.get.side_effect = get_side_effect
+        config.getboolean.side_effect = getboolean_side_effect
+        assert load_config() == (Path(r'C:\Users\qingywu\Music\himalaya'),
+                                 Path(r'C:\Users\qingywu\Documents\personal\To Phone\podcasts'), False, False)
+
+        config.get.side_effect = get_side_effect_keyerr
+        self.assertRaises(SystemExit, load_config)
+
+        config.get.side_effect = get_side_effect_same
+        config.getboolean.side_effect = getboolean_side_effect_err
+        self.assertRaises(SystemExit, load_config)
+
+        mock_isdir.return_value = False
+        config.get.side_effect = get_side_effect
+        config.getboolean.side_effect = getboolean_side_effect
+        self.assertRaises(SystemExit, load_config)
+
+        config.read.side_effect = himarename.configparser.MissingSectionHeaderError(filename=None, lineno=0, line=None)
+        self.assertRaises(SystemExit, load_config)
+
+    @mock.patch('himarename.shutil.rmtree')
+    @mock.patch('himarename.os.makedirs')
+    @mock.patch('himarename.os.listdir')
+    @mock.patch('himarename.Path.is_dir')
+    @mock.patch('himarename.rename_with_id3')
+    @mock.patch('himarename.update_id3')
+    @mock.patch('himarename.copy_file_to_tgt')
+    @mock.patch('himarename.parse_list_json')
+    @mock.patch('himarename.get_json_list')
+    @mock.patch('himarename.load_config')
+    def test_main_logic(self, load_config, get_json_list, parse_list_json, copy_file_to_tgt,
+                        update_id3, rename_with_id3, isdir, listdir, makedirs, rmtree):
+        load_config.return_value = (Path(r'C:\Users\qingywu\Music\himalaya'),
+                                    Path(r'C:\Users\qingywu\Documents\personal\To Phone\podcasts'), False, False)
+        get_json_list.return_value = list()
+        himarename.main()
+        makedirs.assert_called_with(Path(r'C:\Users\qingywu\Documents\personal\To Phone\podcasts'), exist_ok=True)
+
+        get_json_list.return_value = ['1234list.json']
+        parse_list_json.return_value = {
+            25320005: {
+                'filename': 25320005, 'albumId': 4520927, 'tracknumber': 160,
+                'title': "话说宋朝161-机关算尽", 'album': '话说宋朝'},
+            25496548: {
+                'filename': 25496548, 'albumId': 4520927, 'tracknumber': 161,
+                'title': '话说宋朝162-死战不退', 'album': '话说宋朝'}
+        }
+        isdir.return_value = False
+        himarename.main()
+        makedirs.assert_called()
+
+        isdir.return_value = True
+        rmtree.return_value = True
+        himarename.main()
+        makedirs.assert_called_with(Path(r'C:\Users\qingywu\Documents\personal\To Phone\podcasts').joinpath('话说宋朝'),
+                                    exist_ok=True)
+
+        # listdir.return_value = ['25496548.m4a', '25320005.mp3']
+        # # with mock.patch('himarename.PurePath', 'stem', new=mocker.PropertyMock)
+        # # stem = 25496548
+        # update_id3.return_value = None
+        # rename_with_id3.return_value = None
+        # himarename.main()
+        # makedirs.assert_called_with(Path(r'C:\Users\qingywu\Documents\personal\To Phone\podcasts').joinpath('话说宋朝'),
+        #                             exist_ok=True)
