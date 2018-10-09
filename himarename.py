@@ -297,6 +297,8 @@ def main():
     os.makedirs(target_dir, exist_ok=True)
     for jfile in json_file_list:
         tracks = parse_list_json(jfile)
+        if not tracks:
+            continue
         album_path = PurePath(himalaya_download_dir).joinpath(str(list(tracks.values())[0].get('albumId')))
         if not Path(album_path).is_dir():
             logger.warning('Source folder {0} does not exist.'.format(album_path))
@@ -306,10 +308,11 @@ def main():
         # 2. Copy/Move each file in album_path to album_path_tgt
         for file_id3 in tracks.values():
             files = os.listdir(album_path)
+            filename = str(file_id3.get('filename'))
             try:
-                src_file = [fn for fn in files if PurePath(fn).stem == file_id3.get('filename')][0]
+                src_file = [fn for fn in files if PurePath(fn).stem == filename][0]
             except IndexError:
-                msg = 'File {0} does not exist, skip it.'.format(file_id3.get('filename'))
+                msg = 'File {0} does not exist, skip it.'.format(filename)
                 logger.warning(msg)
                 continue
             src_fp = album_path.joinpath(src_file)
