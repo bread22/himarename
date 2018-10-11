@@ -190,6 +190,11 @@ def rename_with_id3(fp):
         except mutagen.id3._util.ID3NoHeaderError:
             audio_file = EasyMP4(fp)
             new_name = '{0}_{1}{2}'.format(audio_file['tracknumber'][0], audio_file['title'][0], fp.suffix)
+        # filter out invalid characters from windows file name
+        new_name = new_name.replace('?', '？')
+        new_name = new_name.replace('"', "'")
+        new_name = new_name.replace('“', "'")
+        new_name = new_name.replace('”', "'")
         try:
             os.rename(fp, fp.parent.joinpath(new_name))
         except FileExistsError:
